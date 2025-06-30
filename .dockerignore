@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Environment files
+.env
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build outputs
+frontend/build/
+backend/static/
+
+# Development files
+.vscode/
+.idea/
+*.log
+*.pid
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.coverage
+.nyc_output
+
+# Documentation
+README.md
+docs/
+
+# Status files
+backend/news_status.json
+
+# Temporary files
+*.tmp
+*.temp 
