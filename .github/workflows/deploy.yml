@@ -48,7 +48,7 @@ jobs:
             --memory 1Gi \
             --cpu 1 \
             --max-instances 10 \
-            --set-env-vars "FLASK_ENV=production,BIGKINDS_API_KEY=${{ secrets.BIGKINDS_API_KEY }}"
+            --set-env-vars "FLASK_ENV=production,BIGKINDS_API_KEY=${{ secrets.BIGKINDS_API_KEY }},OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}"
 
       - name: Show service URL
         run: |
