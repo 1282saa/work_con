@@ -55,7 +55,8 @@ class BigkindsClient:
                 "return_size": return_size,
                 "fields": [
                     "title", "news_id", "published_at", "content", "provider",
-                    "byline", "provider_link_page", "dateline", "enveloped_at", "hilight"
+                    "byline", "provider_link_page", "dateline", "enveloped_at", "hilight",
+                    "category", "category_incident", "provider_subject", "subject_info"
                 ]
             }
         }

@@ -1,404 +1,343 @@
 /**
  * 서울경제신문 콘텐츠 플랫폼
  * 깔끔하고 직관적인 뉴스 작업 관리 시스템
- * 
+ *
  * BigKinds API를 활용하여 뉴스 데이터를 가져오고,
  * Excel과 유사한 고밀도 인터페이스로 작업 상태를 관리합니다.
- * 
+ *
  * @returns {JSX.Element} 메인 애플리케이션 컴포넌트
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import {
   Box,
   Typography,
-  TextField,
-  IconButton,
-  InputAdornment,
   CircularProgress,
   Alert,
   Snackbar,
   Container,
+  AppBar,
+  Toolbar,
+  Tabs,
+  Tab,
   Paper,
-  Fade,
-  Chip,
   Stack,
+  Tooltip,
+  IconButton,
 } from "@mui/material";
 import {
-  Search as SearchIcon,
-  Refresh as RefreshIcon,
-  TrendingUp,
-  Assignment,
+  Home as HomeIcon,
+  Language as LanguageIcon,
+  Newspaper as NewspaperIcon,
   CheckCircle,
+  Assignment,
+  AutoAwesome as SparkleIcon,
+  MenuBook as MenuBookIcon,
 } from "@mui/icons-material";
 import { format } from "date-fns";
 
 import WorkStatusTable from "./components/WorkStatusTable";
 import DateNavigation from "./components/DateNavigation";
+import EmbeddedPage from "./components/EmbeddedPage";
+import PromptSidebar from "./components/PromptSidebar";
+import TimeBasedBackground from "./components/FloatingParticles";
+import { useNewsData } from "./hooks/useNewsData";
+
+// 탭 패널 컴포넌트
+function TabPanel(props) {
+  const { children, value, index, ...other } = props;
+
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`tabpanel-${index}`}
+      aria-labelledby={`tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
+    </div>
+  );
+}
 
 function App() {
-  // 핵심 상태만 유지
-  const [workNewsData, setWorkNewsData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [searchQuery, setSearchQuery] = useState("");
+  // 상태 관리
+  const [currentTab, setCurrentTab] = useState(0);
+  const [searchParams, setSearchParams] = useState({
+    date: format(new Date(), "yyyy-MM-dd"),
+    query: "",
+  });
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: "",
-    severity: "success",
+    severity: "info",
   });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [particlesActive, setParticlesActive] = useState(true);
+  const [currentFilter, setCurrentFilter] = useState("all");
 
-  // 뉴스 데이터 로딩 (useCallback으로 최적화)
-  const fetchWorkNews = useCallback(async () => {
+  // 뉴스 데이터 관리 (커스텀 훅 사용)
+  const {
+    filteredNewsData,
+    loading,
+    error,
+    stats,
+    fetchNews,
+    updateNewsStatus,
+    resetAllNews,
+  } = useNewsData(searchParams, currentFilter);
+
+  // 뉴스 상태 변경 처리
+  const handleStatusChange = async (newsId, newStatus) => {
     try {
-      setLoading(true);
-      setError(null);
-
-      const response = await axios.get("/api/news/hours", {
-        params: {
-          query: searchQuery,
-          date: selectedDate,
-        },
-      });
-
-      if (response.data.success) {
-        setWorkNewsData(response.data.data);
-      } else {
-        throw new Error(response.data.message || "데이터 로딩 중 오류가 발생했습니다.");
-      }
-    } catch (err) {
-      console.error("뉴스 데이터 로딩 실패:", err);
-      const errorMessage = err.response?.data?.message || err.message || "데이터를 가져오는 중 오류가 발생했습니다.";
-      setError(errorMessage);
-      setSnackbar({
-        open: true,
-        message: "데이터 로딩에 실패했습니다.",
-        severity: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery, selectedDate]);
-
-  // 초기 데이터 로딩 및 날짜/검색어 변경 시 자동 갱신
-  useEffect(() => {
-    fetchWorkNews();
-  }, [fetchWorkNews]);
-
-  // 뉴스 상태 변경 처리 (useCallback으로 최적화)
-  const handleStatusChange = useCallback(async (newsId, newStatus) => {
-    try {
-      const response = await axios.post("/api/news/status", {
-        news_id: newsId,
-        status: newStatus,
-      });
-
-      if (response.data.success) {
-        // WorkNewsData 내의 상태 업데이트
-        setWorkNewsData(prevData => {
-          if (!prevData?.hourly_articles) return prevData;
-          
-          const updatedArticles = { ...prevData.hourly_articles };
-          Object.keys(updatedArticles).forEach(hour => {
-            updatedArticles[hour] = updatedArticles[hour].map(item =>
-              item.news_id === newsId ? { ...item, status: newStatus } : item
-            );
-          });
-          
-          return {
-            ...prevData,
-            hourly_articles: updatedArticles
-          };
-        });
-
-        setSnackbar({
-          open: true,
-          message: "상태가 변경되었습니다.",
-          severity: "success",
-        });
-      } else {
-        throw new Error(response.data.message || "상태 변경에 실패했습니다.");
-      }
+      await updateNewsStatus(newsId, newStatus);
     } catch (err) {
       console.error("상태 변경 실패:", err);
-      const errorMessage = err.response?.data?.message || err.message || "상태 변경 중 오류가 발생했습니다.";
       setSnackbar({
         open: true,
-        message: errorMessage,
+        message: "상태 변경 중 오류가 발생했습니다.",
         severity: "error",
       });
     }
-  }, []);
+  };
 
-  // 검색 실행 (useCallback으로 최적화)
-  const handleSearch = useCallback(() => {
-    fetchWorkNews();
-  }, [fetchWorkNews]);
-
-  // Enter 키로 검색 (useCallback으로 최적화)
-  const handleKeyPress = useCallback((event) => {
-    if (event.key === 'Enter') {
-      handleSearch();
-    }
-  }, [handleSearch]);
-
-  // 날짜 변경 핸들러 (useCallback으로 최적화)
-  const handleDateChange = useCallback((newDate) => {
-    setSelectedDate(newDate);
-  }, []);
-
-  // 스낵바 닫기 (useCallback으로 최적화)
-  const handleCloseSnackbar = useCallback(() => {
-    setSnackbar(prev => ({ ...prev, open: false }));
-  }, []);
-
-  // 복사 성공 핸들러 (useCallback으로 최적화)
-  const handleCopySuccess = useCallback((message) => {
+  // 복사 성공 처리
+  const handleCopySuccess = (message) => {
     setSnackbar({
       open: true,
-      message,
+      message: message,
       severity: "success",
     });
-  }, []);
+  };
 
-  // 통계 계산 (useMemo로 최적화)
-  const { newsItems, stats } = useMemo(() => {
-    const items = workNewsData?.hourly_articles 
-      ? Object.values(workNewsData.hourly_articles).flat() 
-      : [];
-    
-    const statistics = {
-      total: items.length,
-      completed: items.filter(item => item.status === '작업완료').length,
-      inProgress: items.filter(item => item.status === '작업중').length,
-      pending: items.filter(item => item.status === '미진행').length,
-    };
-    
-    return { newsItems: items, stats: statistics };
-  }, [workNewsData]);
+  // 검색 핸들러
+  const handleSearch = (query) => {
+    setSearchParams((prev) => ({ ...prev, query }));
+  };
+
+  // 날짜 변경 핸들러
+  const handleDateChange = (date) => {
+    setSearchParams((prev) => ({ ...prev, date }));
+  };
+
+  // 스낵바 닫기 핸들러
+  const handleCloseSnackbar = () => {
+    setSnackbar((prev) => ({ ...prev, open: false }));
+  };
+
+  // 탭 변경 핸들러
+  const handleTabChange = (event, newValue) => {
+    setCurrentTab(newValue);
+  };
+
+  // 사이드바 토글
+  const handleToggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  // 파티클 토글
+  const handleToggleParticles = () => {
+    setParticlesActive(!particlesActive);
+  };
+
+  // 필터 변경 핸들러
+  const handleFilterChange = (newFilter) => {
+    setCurrentFilter(newFilter);
+  };
+
+  // 초기화 핸들러
+  const handleReset = async () => {
+    try {
+      await resetAllNews();
+    } catch (err) {
+      console.error("초기화 실패:", err);
+      setSnackbar({
+        open: true,
+        message: "초기화 중 오류가 발생했습니다.",
+        severity: "error",
+      });
+    }
+  };
 
   return (
-    <Box sx={{ 
-      minHeight: "100vh", 
-      backgroundColor: "#f8fafc",
-      pb: 4
-    }}>
-      {/* 깔끔한 헤더 */}
-      <Paper 
-        elevation={0} 
-        sx={{ 
-          backgroundColor: "white",
-          borderBottom: "1px solid #e2e8f0",
-          mb: 3
+    <>
+      {/* 시간대별 아름다운 배경 효과 */}
+      <TimeBasedBackground isActive={particlesActive} />
+
+      <AppBar
+        position="static"
+        color="default"
+        elevation={0}
+        sx={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}
+      >
+        <Toolbar sx={{ minHeight: "80px" }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            spacing={2}
+            sx={{ flex: 1 }}
+          >
+            <Assignment sx={{ color: "#3b82f6", fontSize: 32 }} />
+            <Box>
+              <Typography
+                variant="h5"
+                sx={{ fontWeight: 700, color: "#1e293b", mb: 0.5 }}
+              >
+                오늘의 작업
+              </Typography>
+            </Box>
+          </Stack>
+
+          {/* 우측 헤더 버튼들 */}
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Tooltip
+              title={particlesActive ? "배경 효과 끄기" : "배경 효과 켜기"}
+            >
+              <IconButton
+                onClick={handleToggleParticles}
+                sx={{
+                  color: particlesActive ? "#ffd700" : "#9ca3af",
+                  "&:hover": {
+                    backgroundColor: "rgba(255, 215, 0, 0.1)",
+                  },
+                }}
+              >
+                <SparkleIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="프롬프트 메모장">
+              <IconButton
+                onClick={handleToggleSidebar}
+                sx={{
+                  color: sidebarOpen ? "#667eea" : "#6b7280",
+                  background: sidebarOpen
+                    ? "linear-gradient(45deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1))"
+                    : "transparent",
+                  "&:hover": {
+                    background:
+                      "linear-gradient(45deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1))",
+                  },
+                }}
+              >
+                <MenuBookIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
+        </Toolbar>
+      </AppBar>
+
+      <Container
+        maxWidth="xl"
+        sx={{
+          py: 4,
+          pr: sidebarOpen ? "420px" : 4,
+          transition: "padding-right 0.3s ease",
         }}
       >
-        <Container maxWidth="xl">
-          <Box sx={{ py: 3 }}>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Assignment sx={{ color: "#3b82f6", fontSize: 32 }} />
-              <Box>
-                <Typography 
-                  variant="h5" 
-                  sx={{ 
-                    fontWeight: 700,
-                    color: "#1e293b",
-                    mb: 0.5
-                  }}
-                >
-                  서울경제신문 콘텐츠 플랫폼
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  효율적인 뉴스 콘텐츠 작업 관리
-                </Typography>
-              </Box>
-            </Stack>
-          </Box>
-        </Container>
-      </Paper>
-
-      <Container maxWidth="xl">
-        {/* 간단한 통계 표시 */}
-        {stats.total > 0 && (
-          <Fade in={true}>
-            <Paper sx={{ p: 3, mb: 3, backgroundColor: "white" }}>
-              <Stack direction="row" spacing={4} alignItems="center">
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <TrendingUp sx={{ color: "#6b7280" }} />
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: "#374151" }}>
-                    오늘의 작업
-                  </Typography>
-                </Box>
-                
-                <Stack direction="row" spacing={3}>
-                  <Chip 
-                    label={`전체 ${stats.total}건`}
-                    sx={{ 
-                      backgroundColor: "#f1f5f9",
-                      color: "#475569",
-                      fontWeight: 600
-                    }}
-                  />
-                  <Chip 
-                    label={`완료 ${stats.completed}건`}
-                    sx={{ 
-                      backgroundColor: "#dcfce7",
-                      color: "#166534",
-                      fontWeight: 600
-                    }}
-                  />
-                  <Chip 
-                    label={`진행중 ${stats.inProgress}건`}
-                    sx={{ 
-                      backgroundColor: "#fef3c7",
-                      color: "#92400e",
-                      fontWeight: 600
-                    }}
-                  />
-                  <Chip 
-                    label={`미진행 ${stats.pending}건`}
-                    sx={{ 
-                      backgroundColor: "#fee2e2",
-                      color: "#991b1b",
-                      fontWeight: 600
-                    }}
-                  />
-                </Stack>
-              </Stack>
-            </Paper>
-          </Fade>
-        )}
-
-        {/* 날짜 네비게이션 */}
-        <DateNavigation
-          selectedDate={selectedDate}
-          onDateChange={handleDateChange}
-        />
-
-        {/* 간소화된 검색 */}
-        <Paper sx={{ p: 3, mb: 3, backgroundColor: "white" }}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <TextField
-              placeholder="검색어를 입력하세요..."
-              size="medium"
-              fullWidth
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={handleKeyPress}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon sx={{ color: "#6b7280" }} />
-                  </InputAdornment>
-                ),
-                sx: {
-                  backgroundColor: "#f8fafc",
-                  borderRadius: 2,
-                  '& .MuiOutlinedInput-notchedOutline': {
-                    border: 'none'
-                  },
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    border: '1px solid #d1d5db'
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    border: '2px solid #3b82f6'
-                  }
-                }
-              }}
+        <Box
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            bgcolor: "white",
+            borderRadius: "8px 8px 0 0",
+          }}
+        >
+          <Tabs
+            value={currentTab}
+            onChange={handleTabChange}
+            aria-label="메인 탭"
+          >
+            <Tab
+              icon={<HomeIcon />}
+              iconPosition="start"
+              label="뉴스 워크플로우"
             />
-            
-            <IconButton
-              onClick={handleSearch}
-              disabled={loading}
-              sx={{
-                backgroundColor: "#3b82f6",
-                color: "white",
-                p: 1.5,
-                '&:hover': {
-                  backgroundColor: "#2563eb"
-                },
-                '&:disabled': {
-                  backgroundColor: "#9ca3af"
-                }
-              }}
-            >
-              {loading ? <CircularProgress size={24} sx={{ color: "white" }} /> : <RefreshIcon />}
-            </IconButton>
-          </Stack>
-        </Paper>
+            <Tab icon={<LanguageIcon />} iconPosition="start" label="캐럿" />
+            <Tab
+              icon={<NewspaperIcon />}
+              iconPosition="start"
+              label="서울경제"
+            />
+          </Tabs>
+        </Box>
 
-        {/* 에러 표시 */}
-        {error && (
-          <Fade in={true}>
+        <TabPanel value={currentTab} index={0}>
+          {/* 날짜 네비게이션 */}
+          <DateNavigation
+            selectedDate={searchParams.date}
+            onDateChange={handleDateChange}
+            onReset={handleReset}
+            onFilterChange={handleFilterChange}
+            currentFilter={currentFilter}
+            searchQuery={searchParams.query}
+            onSearchChange={handleSearch}
+            loading={loading}
+            fetchNews={() => fetchNews(searchParams)}
+            stats={stats}
+          />
+
+          {loading && (
+            <Box sx={{ display: "flex", justifyContent: "center", my: 4 }}>
+              <CircularProgress />
+            </Box>
+          )}
+          {error && (
             <Alert severity="error" sx={{ mb: 3 }}>
               {error}
             </Alert>
-          </Fade>
-        )}
+          )}
+          {!loading && filteredNewsData.length > 0 && (
+            <WorkStatusTable
+              newsData={filteredNewsData}
+              onStatusChange={handleStatusChange}
+              onCopySuccess={handleCopySuccess}
+            />
+          )}
+          {!loading && filteredNewsData.length === 0 && !error && (
+            <Paper sx={{ p: 6, textAlign: "center" }}>
+              <CheckCircle
+                sx={{ fontSize: 64, color: "text.secondary", mb: 2 }}
+              />
+              <Typography variant="h6" color="text.secondary">
+                데이터가 없습니다.
+              </Typography>
+            </Paper>
+          )}
+        </TabPanel>
 
-        {/* 메인 콘텐츠 */}
-        {!error && (
-          <Fade in={!loading}>
-            <Box>
-              {workNewsData && newsItems.length > 0 ? (
-                <WorkStatusTable
-                  newsData={newsItems}
-                  onStatusChange={handleStatusChange}
-                  onCopySuccess={handleCopySuccess}
-                />
-              ) : !loading ? (
-                <Paper sx={{ p: 6, textAlign: "center", backgroundColor: "white" }}>
-                  <CheckCircle sx={{ fontSize: 64, color: "#6b7280", mb: 2 }} />
-                  <Typography variant="h6" color="text.secondary" gutterBottom>
-                    선택한 날짜에 기사가 없습니다
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    다른 날짜를 선택하거나 검색어를 변경해보세요
-                  </Typography>
-                </Paper>
-              ) : null}
-            </Box>
-          </Fade>
-        )}
+        <TabPanel value={currentTab} index={1}>
+          <EmbeddedPage src="https://carat.im/" title="캐럿 (carat.im)" />
+        </TabPanel>
 
-        {/* 로딩 표시 */}
-        {loading && (
-          <Box sx={{ 
-            display: "flex", 
-            flexDirection: "column",
-            alignItems: "center", 
-            justifyContent: "center",
-            py: 8 
-          }}>
-            <CircularProgress size={48} sx={{ mb: 2 }} />
-            <Typography variant="body1" color="text.secondary">
-              데이터를 불러오는 중...
-            </Typography>
-          </Box>
-        )}
+        <TabPanel value={currentTab} index={2}>
+          <EmbeddedPage src="https://www.sedaily.com/" title="서울경제" />
+        </TabPanel>
+
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={4000}
+          onClose={handleCloseSnackbar}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        >
+          <Alert
+            onClose={handleCloseSnackbar}
+            severity={snackbar.severity}
+            sx={{ width: "100%" }}
+          >
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Container>
 
-      {/* 스낵바 */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={3000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-      >
-        <Alert
-          onClose={handleCloseSnackbar}
-          severity={snackbar.severity}
-          variant="filled"
-          sx={{ 
-            minWidth: 250,
-            fontWeight: 500
-          }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </Box>
+      {/* 프롬프트 사이드바 */}
+      <PromptSidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        onCopySuccess={handleCopySuccess}
+      />
+    </>
   );
 }
 

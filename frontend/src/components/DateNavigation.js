@@ -1,193 +1,319 @@
 /**
- * 깔끔한 날짜 네비게이션 컴포넌트
- * 직관적이고 세련된 디자인으로 날짜 선택을 제공합니다.
- * 
- * @param {Object} props - 컴포넌트 props
- * @param {string} props.selectedDate - 선택된 날짜 (YYYY-MM-DD 형식)
- * @param {Function} props.onDateChange - 날짜 변경 핸들러 함수
- * @returns {JSX.Element} 날짜 네비게이션 컴포넌트
+ * 날짜 네비게이션 컴포넌트
+ * 날짜 선택, 필터링, 검색, 초기화 기능을 통합 제공
  */
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useState } from "react";
 import {
   Box,
   Paper,
   Typography,
-  IconButton,
   TextField,
-  Stack,
+  IconButton,
+  InputAdornment,
   Button,
-} from '@mui/material';
+  Chip,
+  Select,
+  MenuItem,
+  FormControl,
+  Popover,
+  Grid,
+} from "@mui/material";
 import {
+  Search as SearchIcon,
+  Refresh as RefreshIcon,
+  CalendarToday as CalendarIcon,
+  TrendingUp,
   ChevronLeft,
   ChevronRight,
-  Today,
-  CalendarMonth,
-} from '@mui/icons-material';
-import { format, addDays, subDays } from 'date-fns';
-import { ko } from 'date-fns/locale';
+} from "@mui/icons-material";
+import {
+  format,
+  subDays,
+  addDays,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  isSameDay,
+  isSameMonth,
+} from "date-fns";
 
-const DateNavigation = ({ selectedDate, onDateChange }) => {
-  // 문자열 날짜를 Date 객체로 변환 (useMemo로 최적화)
-  const currentDate = useMemo(() => new Date(selectedDate), [selectedDate]);
+const DateNavigation = ({
+  selectedDate,
+  onDateChange,
+  onReset,
+  onFilterChange,
+  currentFilter,
+  searchQuery,
+  onSearchChange,
+  loading,
+  fetchNews,
+  stats,
+}) => {
+  const [calendarAnchor, setCalendarAnchor] = useState(null);
+  const [calendarDate, setCalendarDate] = useState(new Date(selectedDate));
 
-  // 이전 날짜로 이동 (useCallback으로 최적화)
-  const handlePrevDay = useCallback(() => {
-    const prevDate = subDays(currentDate, 1);
-    onDateChange(format(prevDate, 'yyyy-MM-dd'));
-  }, [currentDate, onDateChange]);
+  const handlePrevDay = () => {
+    const date = new Date(selectedDate);
+    onDateChange(format(subDays(date, 1), "yyyy-MM-dd"));
+  };
 
-  // 다음 날짜로 이동 (useCallback으로 최적화)
-  const handleNextDay = useCallback(() => {
-    const nextDate = addDays(currentDate, 1);
-    onDateChange(format(nextDate, 'yyyy-MM-dd'));
-  }, [currentDate, onDateChange]);
+  const handleNextDay = () => {
+    const date = new Date(selectedDate);
+    onDateChange(format(addDays(date, 1), "yyyy-MM-dd"));
+  };
 
-  // 오늘 날짜로 이동 (useCallback으로 최적화)
-  const handleToday = useCallback(() => {
-    const today = new Date();
-    onDateChange(format(today, 'yyyy-MM-dd'));
-  }, [onDateChange]);
+  const handleToday = () => {
+    onDateChange(format(new Date(), "yyyy-MM-dd"));
+  };
 
-  // 날짜 직접 입력 (useCallback으로 최적화)
-  const handleDateInputChange = useCallback((event) => {
-    const newDate = event.target.value;
-    if (newDate) {
-      onDateChange(newDate);
+  const handleCalendarOpen = (event) => {
+    setCalendarAnchor(event.currentTarget);
+    setCalendarDate(new Date(selectedDate));
+  };
+
+  const handleCalendarClose = () => {
+    setCalendarAnchor(null);
+  };
+
+  const handleDateSelect = (date) => {
+    onDateChange(format(date, "yyyy-MM-dd"));
+    handleCalendarClose();
+  };
+
+  const handleCalendarMonthChange = (direction) => {
+    if (direction === "prev") {
+      setCalendarDate(subDays(startOfMonth(calendarDate), 1));
+    } else {
+      setCalendarDate(addDays(endOfMonth(calendarDate), 1));
     }
-  }, [onDateChange]);
+  };
 
-  // 날짜 포맷팅 및 오늘 여부 계산 (useMemo로 최적화)
-  const { formattedDate, isToday } = useMemo(() => {
-    const koreanDate = format(currentDate, 'yyyy년 MM월 dd일 (E)', { locale: ko });
-    const todayCheck = format(currentDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
-    return { formattedDate: koreanDate, isToday: todayCheck };
-  }, [currentDate]);
+  // 달력 렌더링
+  const renderCalendar = () => {
+    const monthStart = startOfMonth(calendarDate);
+    const monthEnd = endOfMonth(calendarDate);
+    const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
-  return (
-    <Paper 
-      sx={{ 
-        p: 3, 
-        mb: 3, 
-        backgroundColor: "white",
-        border: "1px solid #e2e8f0",
-        borderRadius: 3
-      }}
-    >
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        {/* 중앙: 날짜 표시 및 네비게이션 */}
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ flex: 1, justifyContent: "center" }}>
+    // 월의 첫 번째 날이 시작하는 요일만큼 앞쪽에 빈 칸 추가
+    const startDay = monthStart.getDay();
+    const emptyDays = Array(startDay).fill(null);
+
+    return (
+      <Box sx={{ p: 2, width: 280 }}>
+        {/* 달력 헤더 */}
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            mb: 2,
+          }}
+        >
           <IconButton
-            onClick={handlePrevDay}
-            sx={{
-              backgroundColor: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              color: "#64748b",
-              '&:hover': {
-                backgroundColor: "#f1f5f9",
-                borderColor: "#cbd5e1"
-              },
-            }}
+            size="small"
+            onClick={() => handleCalendarMonthChange("prev")}
           >
             <ChevronLeft />
           </IconButton>
-
-          <Box sx={{ mx: 4, textAlign: 'center', minWidth: 320 }}>
-            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1} sx={{ mb: 1 }}>
-              <CalendarMonth sx={{ color: "#3b82f6", fontSize: 28 }} />
-              <Typography
-                variant="h5"
-                sx={{ 
-                  fontWeight: 700,
-                  color: "#1e293b"
-                }}
-              >
-                {formattedDate}
-              </Typography>
-              {isToday && (
-                <Box
-                  sx={{
-                    backgroundColor: "#dcfce7",
-                    color: "#166534",
-                    px: 1.5,
-                    py: 0.5,
-                    borderRadius: 1,
-                    fontSize: "0.75rem",
-                    fontWeight: 600
-                  }}
-                >
-                  오늘
-                </Box>
-              )}
-            </Stack>
-            <Typography variant="body2" color="text.secondary">
-              좌우 화살표 또는 달력으로 날짜를 변경하세요
-            </Typography>
-          </Box>
-
+          <Typography variant="h6" sx={{ fontWeight: "bold" }}>
+            {format(calendarDate, "yyyy년 MM월")}
+          </Typography>
           <IconButton
-            onClick={handleNextDay}
-            sx={{
-              backgroundColor: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              color: "#64748b",
-              '&:hover': {
-                backgroundColor: "#f1f5f9",
-                borderColor: "#cbd5e1"
-              },
-            }}
+            size="small"
+            onClick={() => handleCalendarMonthChange("next")}
           >
             <ChevronRight />
           </IconButton>
-        </Stack>
+        </Box>
 
-        {/* 오른쪽: 날짜 입력 및 오늘 버튼 */}
-        <Stack direction="row" alignItems="center" spacing={2}>
-          <TextField
-            type="date"
-            value={selectedDate}
-            onChange={handleDateInputChange}
-            size="small"
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                backgroundColor: "#f8fafc",
-                borderRadius: 2,
-                '& fieldset': {
-                  borderColor: '#e2e8f0',
-                },
-                '&:hover fieldset': {
-                  borderColor: '#cbd5e1',
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: '#3b82f6',
-                },
-              },
-            }}
-          />
+        {/* 요일 헤더 */}
+        <Grid container spacing={0} sx={{ mb: 1 }}>
+          {["일", "월", "화", "수", "목", "금", "토"].map((day) => (
+            <Grid item xs key={day} sx={{ textAlign: "center" }}>
+              <Typography
+                variant="caption"
+                sx={{ fontWeight: "bold", color: "text.secondary" }}
+              >
+                {day}
+              </Typography>
+            </Grid>
+          ))}
+        </Grid>
 
-          <Button
-            onClick={handleToday}
-            startIcon={<Today />}
-            variant="contained"
-            size="small"
-            sx={{
-              backgroundColor: "#3b82f6",
-              color: "white",
-              fontWeight: 600,
-              px: 2,
-              '&:hover': {
-                backgroundColor: "#2563eb"
-              },
-              '&:disabled': {
-                backgroundColor: "#9ca3af"
-              }
-            }}
-            disabled={isToday}
-          >
-            오늘
+        {/* 날짜 그리드 */}
+        <Grid container spacing={0}>
+          {emptyDays.map((_, index) => (
+            <Grid item xs key={`empty-${index}`} sx={{ aspectRatio: "1" }} />
+          ))}
+          {days.map((day) => {
+            const isSelected = isSameDay(day, new Date(selectedDate));
+            const isToday = isSameDay(day, new Date());
+
+            return (
+              <Grid item xs key={day.getTime()} sx={{ aspectRatio: "1" }}>
+                <Button
+                  onClick={() => handleDateSelect(day)}
+                  sx={{
+                    width: "100%",
+                    height: "100%",
+                    minWidth: 0,
+                    borderRadius: 1,
+                    backgroundColor: isSelected ? "#3b82f6" : "transparent",
+                    color: isSelected
+                      ? "white"
+                      : isToday
+                      ? "#3b82f6"
+                      : "text.primary",
+                    fontWeight: isToday ? "bold" : "normal",
+                    "&:hover": {
+                      backgroundColor: isSelected ? "#2563eb" : "#f1f5f9",
+                    },
+                  }}
+                >
+                  {format(day, "d")}
+                </Button>
+              </Grid>
+            );
+          })}
+        </Grid>
+
+        {/* 오늘 버튼 */}
+        <Box sx={{ mt: 2, textAlign: "center" }}>
+          <Button size="small" onClick={() => handleDateSelect(new Date())}>
+            오늘로 이동
           </Button>
-        </Stack>
-      </Stack>
+        </Box>
+      </Box>
+    );
+  };
+
+  return (
+    <Paper
+      sx={{
+        p: 2,
+        mb: 3,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}
+    >
+      {/* 좌측: 필터 드롭다운 + 통계 */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, flex: 1 }}>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <Select
+            value={currentFilter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            displayEmpty
+          >
+            <MenuItem value="all">전체보기</MenuItem>
+            <MenuItem value="pending">미진행만</MenuItem>
+            <MenuItem value="completed">완료만</MenuItem>
+            <MenuItem value="inProgress">진행중만</MenuItem>
+          </Select>
+        </FormControl>
+
+        <Chip
+          label={`완료 ${stats.completed}건`}
+          color="success"
+          variant="outlined"
+          size="small"
+        />
+        <Chip
+          label={`진행중 ${stats.inProgress}건`}
+          color="warning"
+          variant="outlined"
+          size="small"
+        />
+        <Chip
+          label={`미진행 ${stats.pending}건`}
+          color="error"
+          variant="outlined"
+          size="small"
+        />
+      </Box>
+
+      {/* 중앙: 날짜 네비게이션 */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          flex: 1,
+          justifyContent: "center",
+        }}
+      >
+        <IconButton onClick={handleCalendarOpen}>
+          <CalendarIcon sx={{ color: "#3b82f6" }} />
+        </IconButton>
+        <IconButton onClick={handlePrevDay}>
+          <TrendingUp style={{ transform: "rotate(-135deg)" }} />
+        </IconButton>
+        <Typography
+          variant="h6"
+          sx={{ mx: 2, minWidth: "200px", textAlign: "center" }}
+        >
+          {format(new Date(selectedDate), "yyyy년 MM월 dd일 (E)")}
+        </Typography>
+        <IconButton onClick={handleNextDay}>
+          <TrendingUp style={{ transform: "rotate(45deg)" }} />
+        </IconButton>
+        <Button variant="outlined" size="small" onClick={handleToday}>
+          오늘
+        </Button>
+      </Box>
+
+      {/* 우측: 검색 + 초기화 */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          flex: 1,
+          justifyContent: "flex-end",
+        }}
+      >
+        <TextField
+          size="small"
+          label="검색어 입력..."
+          variant="outlined"
+          value={searchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          sx={{ minWidth: "200px" }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon />
+              </InputAdornment>
+            ),
+            endAdornment: (
+              <IconButton size="small" onClick={fetchNews} disabled={loading}>
+                <RefreshIcon />
+              </IconButton>
+            ),
+          }}
+        />
+        <Button variant="outlined" size="small" onClick={onReset} color="error">
+          초기화
+        </Button>
+      </Box>
+
+      {/* 달력 팝오버 */}
+      <Popover
+        open={Boolean(calendarAnchor)}
+        anchorEl={calendarAnchor}
+        onClose={handleCalendarClose}
+        anchorOrigin={{
+          vertical: "bottom",
+          horizontal: "center",
+        }}
+        transformOrigin={{
+          vertical: "top",
+          horizontal: "center",
+        }}
+      >
+        {renderCalendar()}
+      </Popover>
     </Paper>
   );
 };

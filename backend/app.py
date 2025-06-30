@@ -12,12 +12,21 @@ import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from utils.api_client import BigkindsClient
+from utils.gpt_client import GPTClient
 import mimetypes
 import subprocess
 from static_serve import StaticFileHandler
 
-# .env 파일 로드
+# .env 파일 로드 (가장 먼저)
 load_dotenv()
+
+# 환경변수 로딩 확인
+print(f"현재 작업 디렉토리: {os.getcwd()}")
+print(f".env 파일 존재 여부: {os.path.exists('.env')}")
+openai_key = os.getenv('OPENAI_API_KEY')
+print(f"OpenAI API 키 로드됨: {'예' if openai_key else '아니오'}")
+if openai_key:
+    print(f"API 키 앞 20자: {openai_key[:20]}...")
 
 # Flask 애플리케이션 초기화
 app = Flask(__name__, static_folder='static', static_url_path='')
@@ -35,11 +44,24 @@ mimetypes.add_type('text/css', '.css')
 # 빅카인즈 API 클라이언트 초기화
 api_client = BigkindsClient()
 
+# GPT API 클라이언트 초기화
+try:
+    logger.info("GPT 클라이언트 초기화 시작...")
+    
+    gpt_client = GPTClient()
+    logger.info("GPT 클라이언트 초기화 완료")
+except Exception as e:
+    logger.error(f"GPT 클라이언트 초기화 실패: {e}")
+    logger.error(f"오류 타입: {type(e).__name__}")
+    import traceback
+    logger.error(f"전체 스택 트레이스: {traceback.format_exc()}")
+    gpt_client = None
+
 # 정적 파일 핸들러 초기화
 static_handler = StaticFileHandler(os.getcwd())
 
 # 뉴스 상태 데이터 저장소 (실제 환경에서는 데이터베이스 사용 권장)
-# { news_id: { "status": "미진행" | "작업중" | "작업완료" } }
+# { news_id: { "status": "미진행" | "작업중" | "작업완료", "ai_content": "생성된 콘텐츠" } }
 news_status = {}
 
 # 상태 파일 경로
@@ -114,7 +136,11 @@ def get_news():
         # URL 쿼리 파라미터에서 검색 조건 추출
         query = request.args.get('query', '')
         selected_date = request.args.get('date', '')
-        limit = request.args.get('limit', 100, type=int)
+        limit = request.args.get('limit', 1000, type=int)  # 기본값을 1000으로 증가
+        
+        # 최대 10000개로 제한 (API 한계)
+        if limit > 10000:
+            limit = 10000
         
         # 단일 날짜에서 시작일/종료일 자동 생성
         if not selected_date:
@@ -130,7 +156,7 @@ def get_news():
             from_date=from_date, 
             until_date=until_date,
             provider=[],
-            return_size=limit
+            return_size=limit  # 실제 limit 값 사용
         )
         
         # ----- 변경 시작: 응답 구조에 맞게 documents 추출 -----
@@ -151,10 +177,20 @@ def get_news():
             news_id = news.get('news_id')
             if news_id in news_status:
                 news['status'] = news_status[news_id]['status']
+                news['ai_content'] = news_status[news_id].get('ai_content', '')
             else:
                 # 상태 정보가 없으면 '미진행' 상태로 초기화
                 news['status'] = '미진행'
-                news_status[news_id] = {'status': '미진행'}
+                news['ai_content'] = ''
+                news_status[news_id] = {'status': '미진행', 'ai_content': ''}
+            
+            # 카테고리 정보 처리 (배열인 경우 첫 번째 값 사용)
+            if 'category' in news and isinstance(news['category'], list):
+                news['category'] = news['category'][0] if news['category'] else None
+            
+            # 디버깅: 첫 번째 기사의 필드 정보 출력
+            if news_list.index(news) == 0:
+                logger.debug("첫 번째 기사 필드 정보: %s", list(news.keys()))
         
         # 상태 정보 저장
         save_status()
@@ -162,7 +198,9 @@ def get_news():
         return jsonify({
             'success': True,
             'data': news_list,
-            'total': len(news_list)
+            'total': len(news_list),
+            'requested_limit': limit,
+            'actual_count': len(news_list)
         })
         
     except Exception as e:
@@ -192,10 +230,11 @@ def update_news_status():
             }), 400
             
         # 상태 업데이트
-        news_status[news_id] = {
-            'status': status,
-            'updated_at': datetime.now().isoformat()
-        }
+        if news_id not in news_status:
+            news_status[news_id] = {'status': '미진행', 'ai_content': ''}
+        
+        news_status[news_id]['status'] = status
+        news_status[news_id]['updated_at'] = datetime.now().isoformat()
         
         # 상태 저장
         save_status()
@@ -258,9 +297,15 @@ def get_news_by_hours():
             news_id = news.get('news_id')
             if news_id in news_status:
                 news['status'] = news_status[news_id]['status']
+                news['ai_content'] = news_status[news_id].get('ai_content', '')
             else:
                 news['status'] = '미진행'
-                news_status[news_id] = {'status': '미진행'}
+                news['ai_content'] = ''
+                news_status[news_id] = {'status': '미진행', 'ai_content': ''}
+            
+            # 카테고리 정보 처리 (배열인 경우 첫 번째 값 사용)
+            if 'category' in news and isinstance(news['category'], list):
+                news['category'] = news['category'][0] if news['category'] else None
             
             # 시간 정보 추출
             date_str = news.get('dateline') or news.get('published_at', '')
@@ -328,6 +373,121 @@ def get_status_summary():
         })
         
     except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/generate/instagram', methods=['POST'])
+def generate_instagram_content():
+    """뉴스 기사를 바탕으로 인스타그램 콘텐츠를 생성하는 API 엔드포인트"""
+    try:
+        if not gpt_client:
+            return jsonify({
+                'success': False,
+                'message': 'GPT 클라이언트가 초기화되지 않았습니다. API 키를 확인해주세요.'
+            }), 500
+        
+        data = request.get_json()
+        title = data.get('title', '')
+        content = data.get('content', '')
+        category = data.get('category', '')
+        news_id = data.get('news_id', '')
+        
+        if not title:
+            return jsonify({
+                'success': False,
+                'message': '제목이 필요합니다.'
+            }), 400
+        
+        # 이미 생성된 콘텐츠가 있는지 확인
+        if news_id and news_id in news_status and news_status[news_id].get('ai_content'):
+            return jsonify({
+                'success': True,
+                'data': {
+                    'content': news_status[news_id]['ai_content'],
+                    'cached': True
+                }
+            })
+        
+        # GPT로 인스타그램 콘텐츠 생성
+        result = gpt_client.generate_instagram_content(
+            title=title,
+            content=content,
+            category=category
+        )
+        
+        if result['success']:
+            # 생성된 콘텐츠를 저장 (상태는 변경하지 않음)
+            if news_id:
+                if news_id not in news_status:
+                    news_status[news_id] = {'status': '미진행', 'ai_content': ''}
+                news_status[news_id]['ai_content'] = result['content']
+                news_status[news_id]['ai_generated_at'] = datetime.now().isoformat()
+                save_status()
+            
+            return jsonify({
+                'success': True,
+                'data': {
+                    'content': result['content'],
+                    'raw_response': result.get('raw_response', ''),
+                    'cached': False
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f"콘텐츠 생성 실패: {result.get('error', '알 수 없는 오류')}"
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"인스타그램 콘텐츠 생성 중 오류: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/generate/hashtags', methods=['POST'])
+def generate_hashtags():
+    """제목만으로 빠르게 해시태그를 생성하는 API 엔드포인트"""
+    try:
+        if not gpt_client:
+            return jsonify({
+                'success': False,
+                'message': 'GPT 클라이언트가 초기화되지 않았습니다.'
+            }), 500
+        
+        data = request.get_json()
+        title = data.get('title', '')
+        category = data.get('category', '')
+        
+        if not title:
+            return jsonify({
+                'success': False,
+                'message': '제목이 필요합니다.'
+            }), 400
+        
+        # GPT로 해시태그 생성
+        result = gpt_client.generate_quick_hashtags(
+            title=title,
+            category=category
+        )
+        
+        if result['success']:
+            return jsonify({
+                'success': True,
+                'data': {
+                    'hashtags': result['hashtags']
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': f"해시태그 생성 실패: {result.get('error', '알 수 없는 오류')}"
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"해시태그 생성 중 오류: {e}")
         return jsonify({
             'success': False,
             'message': str(e)
