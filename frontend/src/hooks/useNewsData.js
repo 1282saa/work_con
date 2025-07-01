@@ -13,6 +13,7 @@ export const useNewsData = (searchParams, currentFilter) => {
   const [error, setError] = useState(null);
   const [lastActivity, setLastActivity] = useState(Date.now());
   const intervalRef = useRef(null);
+  const eventSourceRef = useRef(null);
 
   // 뉴스 데이터 로딩
   const fetchNews = useCallback(async (params, isBackground = false) => {
@@ -132,9 +133,70 @@ export const useNewsData = (searchParams, currentFilter) => {
     return newsData;
   }, [newsData, currentFilter]);
 
-  // 자동 새로고침 설정
+  // Server-Sent Events 설정
   useEffect(() => {
-    // 30초마다 백그라운드에서 데이터 새로고침
+    // SSE 연결 설정
+    const connectSSE = () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+
+      console.log("🔗 실시간 업데이트 연결 중...");
+      eventSourceRef.current = new EventSource("/api/events");
+
+      eventSourceRef.current.onmessage = (event) => {
+        try {
+          const updateEvent = JSON.parse(event.data);
+          console.log("📡 실시간 업데이트 수신:", updateEvent);
+
+          if (updateEvent.type === "status_change") {
+            // 상태 변경 실시간 반영
+            setNewsData((prevData) =>
+              prevData.map((item) =>
+                item.news_id === updateEvent.data.news_id
+                  ? { ...item, status: updateEvent.data.status }
+                  : item
+              )
+            );
+          } else if (updateEvent.type === "ai_content_generated") {
+            // AI 콘텐츠 생성 실시간 반영
+            setNewsData((prevData) =>
+              prevData.map((item) =>
+                item.news_id === updateEvent.data.news_id
+                  ? { ...item, ai_content: "생성됨" } // 실제 콘텐츠는 클릭 시 로드
+                  : item
+              )
+            );
+          }
+        } catch (error) {
+          console.error("SSE 이벤트 파싱 오류:", error);
+        }
+      };
+
+      eventSourceRef.current.onerror = (error) => {
+        console.error("SSE 연결 오류:", error);
+        // 5초 후 재연결 시도
+        setTimeout(connectSSE, 5000);
+      };
+
+      eventSourceRef.current.onopen = () => {
+        console.log("✅ 실시간 업데이트 연결됨");
+      };
+    };
+
+    connectSSE();
+
+    // 컴포넌트 언마운트 시 정리
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  // 기존 자동 새로고침도 유지 (백업용)
+  useEffect(() => {
+    // 30초마다 백그라운드에서 데이터 새로고침 (SSE 백업)
     const startAutoRefresh = () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -145,10 +207,10 @@ export const useNewsData = (searchParams, currentFilter) => {
         const timeSinceActivity = Date.now() - lastActivity;
         if (timeSinceActivity < 5 * 60 * 1000) {
           // 5분
-          console.log("🔄 자동 새로고침 중...");
+          console.log("🔄 백업 새로고침 중...");
           fetchNews(searchParams, true); // 백그라운드 새로고침
         }
-      }, 30000); // 30초마다
+      }, 30000); // 30초마다 (SSE 백업용)
     };
 
     startAutoRefresh();

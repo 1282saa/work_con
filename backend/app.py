@@ -4,7 +4,7 @@
 작업 상태를 관리하는 API를 제공합니다.
 """
 
-from flask import Flask, jsonify, request, send_from_directory, send_file
+from flask import Flask, jsonify, request, send_from_directory, send_file, Response
 from flask_cors import CORS
 import json
 import os
@@ -16,6 +16,8 @@ from utils.gpt_client import GPTClient
 import mimetypes
 import subprocess
 from static_serve import StaticFileHandler
+import time
+import threading
 
 # .env 파일 로드 (가장 먼저)
 load_dotenv()
@@ -239,6 +241,13 @@ def update_news_status():
         # 상태 저장
         save_status()
         
+        # 실시간 업데이트 이벤트 발생
+        add_update_event('status_change', {
+            'news_id': news_id,
+            'status': status,
+            'updated_at': datetime.now().isoformat()
+        })
+        
         return jsonify({
             'success': True,
             'data': {
@@ -425,6 +434,13 @@ def generate_instagram_content():
                 news_status[news_id]['ai_content'] = result['content']
                 news_status[news_id]['ai_generated_at'] = datetime.now().isoformat()
                 save_status()
+                
+                # 실시간 업데이트 이벤트 발생
+                add_update_event('ai_content_generated', {
+                    'news_id': news_id,
+                    'has_content': True,
+                    'generated_at': datetime.now().isoformat()
+                })
             
             return jsonify({
                 'success': True,
@@ -652,6 +668,51 @@ def debug_structure():
     debug_info['available_static_files'] = static_handler.list_available_files()
     
     return jsonify(debug_info)
+
+# 실시간 업데이트를 위한 이벤트 저장소
+update_events = []
+update_lock = threading.Lock()
+
+def add_update_event(event_type, data):
+    """실시간 업데이트 이벤트 추가"""
+    with update_lock:
+        timestamp = datetime.now().isoformat()
+        event = {
+            'type': event_type,
+            'data': data,
+            'timestamp': timestamp
+        }
+        update_events.append(event)
+        # 최근 100개 이벤트만 유지
+        if len(update_events) > 100:
+            update_events.pop(0)
+        print(f"📡 실시간 이벤트 추가: {event_type}")
+
+@app.route('/api/events')
+def stream_updates():
+    """Server-Sent Events 스트림"""
+    def event_stream():
+        last_sent = 0
+        while True:
+            with update_lock:
+                # 새로운 이벤트만 전송
+                new_events = update_events[last_sent:]
+                for event in new_events:
+                    yield f"data: {json.dumps(event)}\n\n"
+                last_sent = len(update_events)
+            
+            time.sleep(1)  # 1초마다 체크
+    
+    return Response(
+        event_stream(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )
 
 if __name__ == '__main__':
     # 개발/프로덕션 환경 분기
