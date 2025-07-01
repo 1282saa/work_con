@@ -5,22 +5,31 @@ OpenAI GPT API를 활용한 인스타그램 콘텐츠 생성 클라이언트
 
 import os
 import openai
-from dotenv import load_dotenv
-
-# .env 파일에서 환경변수 로드
-load_dotenv()
 
 class GPTClient:
     """OpenAI GPT API 클라이언트 클래스"""
     
     def __init__(self):
         """GPT 클라이언트 초기화"""
+        # 환경변수에서 직접 읽기 (프로덕션 환경 고려)
         self.api_key = os.getenv('OPENAI_API_KEY')
+        
+        # 디버깅 정보 출력
+        print(f"GPT 클라이언트 초기화 중...")
+        print(f"OPENAI_API_KEY 존재 여부: {'예' if self.api_key else '아니오'}")
+        if self.api_key:
+            print(f"API 키 앞 20자: {self.api_key[:20]}...")
+        
         if not self.api_key:
-            raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+            raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다. 환경변수를 확인해주세요.")
         
         # OpenAI 클라이언트 초기화
-        self.client = openai.OpenAI(api_key=self.api_key)
+        try:
+            self.client = openai.OpenAI(api_key=self.api_key)
+            print("OpenAI 클라이언트 초기화 성공")
+        except Exception as e:
+            print(f"OpenAI 클라이언트 초기화 실패: {e}")
+            raise
         
     def generate_instagram_content(self, title, content, category=None):
         """

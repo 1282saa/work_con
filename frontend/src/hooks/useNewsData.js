@@ -1,26 +1,38 @@
 /**
  * 뉴스 데이터 관리 커스텀 훅
  * 데이터 로딩, 상태 변경, 필터링 로직을 캡슐화
+ * 자동 새로고침으로 실시간 동기화 지원
  */
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import axios from "axios";
 
 export const useNewsData = (searchParams, currentFilter) => {
   const [newsData, setNewsData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const intervalRef = useRef(null);
 
   // 뉴스 데이터 로딩
-  const fetchNews = useCallback(async (params) => {
+  const fetchNews = useCallback(async (params, isBackground = false) => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!isBackground) {
+        setLoading(true);
+        setError(null);
+      }
 
       const response = await axios.get("/api/news", { params });
 
       if (response.data.success) {
         setNewsData(response.data.data || []);
+        if (!isBackground) {
+          console.log(
+            "📊 뉴스 데이터 업데이트됨:",
+            response.data.data.length,
+            "개"
+          );
+        }
       } else {
         throw new Error(
           response.data.message || "데이터 로딩 중 오류가 발생했습니다."
@@ -28,16 +40,26 @@ export const useNewsData = (searchParams, currentFilter) => {
       }
     } catch (err) {
       console.error("뉴스 데이터 로딩 실패:", err);
-      setError(err.message || "데이터를 가져오는 중 오류가 발생했습니다.");
-      // 팝업 제거 - 속도 우선
+      if (!isBackground) {
+        setError(err.message || "데이터를 가져오는 중 오류가 발생했습니다.");
+      }
     } finally {
-      setLoading(false);
+      if (!isBackground) {
+        setLoading(false);
+      }
     }
+  }, []);
+
+  // 사용자 활동 감지
+  const updateActivity = useCallback(() => {
+    setLastActivity(Date.now());
   }, []);
 
   // 뉴스 상태 변경 (Optimistic UI)
   const updateNewsStatus = useCallback(
     async (newsId, newStatus) => {
+      updateActivity(); // 사용자 활동 기록
+
       // 1. 즉시 UI 업데이트 (Optimistic)
       const previousData = newsData;
       setNewsData((prevData) =>
@@ -62,11 +84,13 @@ export const useNewsData = (searchParams, currentFilter) => {
         throw error;
       }
     },
-    [newsData]
+    [newsData, updateActivity]
   );
 
   // 모든 뉴스 초기화
   const resetAllNews = useCallback(async () => {
+    updateActivity(); // 사용자 활동 기록
+
     const resetPromises = newsData.map(async (news) => {
       if (news.status !== "미진행") {
         return axios.post("/api/news/status", {
@@ -82,7 +106,7 @@ export const useNewsData = (searchParams, currentFilter) => {
     setNewsData((prevData) =>
       prevData.map((item) => ({ ...item, status: "미진행" }))
     );
-  }, [newsData]);
+  }, [newsData, updateActivity]);
 
   // 통계 계산
   const stats = useMemo(() => {
@@ -108,10 +132,57 @@ export const useNewsData = (searchParams, currentFilter) => {
     return newsData;
   }, [newsData, currentFilter]);
 
+  // 자동 새로고침 설정
+  useEffect(() => {
+    // 30초마다 백그라운드에서 데이터 새로고침
+    const startAutoRefresh = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+
+      intervalRef.current = setInterval(() => {
+        // 최근 5분 이내에 사용자 활동이 있었다면 새로고침
+        const timeSinceActivity = Date.now() - lastActivity;
+        if (timeSinceActivity < 5 * 60 * 1000) {
+          // 5분
+          console.log("🔄 자동 새로고침 중...");
+          fetchNews(searchParams, true); // 백그라운드 새로고침
+        }
+      }, 30000); // 30초마다
+    };
+
+    startAutoRefresh();
+
+    // 컴포넌트 언마운트 시 정리
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [searchParams, fetchNews, lastActivity]);
+
   // 파라미터 변경시 데이터 로딩
   useEffect(() => {
     fetchNews(searchParams);
   }, [searchParams, fetchNews]);
+
+  // 사용자 활동 감지 이벤트 리스너
+  useEffect(() => {
+    const handleUserActivity = () => updateActivity();
+
+    // 마우스, 키보드, 터치 이벤트 감지
+    window.addEventListener("mousedown", handleUserActivity);
+    window.addEventListener("keydown", handleUserActivity);
+    window.addEventListener("touchstart", handleUserActivity);
+    window.addEventListener("scroll", handleUserActivity);
+
+    return () => {
+      window.removeEventListener("mousedown", handleUserActivity);
+      window.removeEventListener("keydown", handleUserActivity);
+      window.removeEventListener("touchstart", handleUserActivity);
+      window.removeEventListener("scroll", handleUserActivity);
+    };
+  }, [updateActivity]);
 
   return {
     newsData,
@@ -122,5 +193,6 @@ export const useNewsData = (searchParams, currentFilter) => {
     fetchNews,
     updateNewsStatus,
     resetAllNews,
+    updateActivity, // 수동으로 활동 업데이트
   };
 };

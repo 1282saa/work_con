@@ -86,6 +86,7 @@ function App() {
     fetchNews,
     updateNewsStatus,
     resetAllNews,
+    updateActivity,
   } = useNewsData(searchParams, currentFilter);
 
   // 뉴스 상태 변경 처리
@@ -102,8 +103,9 @@ function App() {
     }
   };
 
-  // 복사 성공 처리
+  // 복사 성공 처리 (updateActivity 포함)
   const handleCopySuccess = (message) => {
+    updateActivity(); // 사용자 활동 기록
     setSnackbar({
       open: true,
       message: message,
@@ -293,6 +295,7 @@ function App() {
               newsData={filteredNewsData}
               onStatusChange={handleStatusChange}
               onCopySuccess={handleCopySuccess}
+              updateActivity={updateActivity}
             />
           )}
           {!loading && filteredNewsData.length === 0 && !error && (

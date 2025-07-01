@@ -6,6 +6,7 @@
  * @param {Array} props.newsData - 뉴스 데이터 배열
  * @param {Function} props.onStatusChange - 상태 변경 핸들러 함수
  * @param {Function} props.onCopySuccess - 복사 성공 콜백 함수
+ * @param {Function} props.updateActivity - 사용자 활동 기록 함수
  * @returns {JSX.Element} 작업 현황 테이블 컴포넌트
  */
 
@@ -341,7 +342,12 @@ const TableRowMemo = React.memo(
 
 TableRowMemo.displayName = "TableRowMemo";
 
-const WorkStatusTable = ({ newsData, onStatusChange, onCopySuccess }) => {
+const WorkStatusTable = ({
+  newsData,
+  onStatusChange,
+  onCopySuccess,
+  updateActivity,
+}) => {
   const [sortBy, setSortBy] = useState("time");
   const [sortOrder, setSortOrder] = useState("desc");
   const [loadingItems, setLoadingItems] = useState(new Set());
@@ -441,6 +447,11 @@ const WorkStatusTable = ({ newsData, onStatusChange, onCopySuccess }) => {
     async (article) => {
       if (loadingItems.has(article.news_id)) return;
 
+      // 사용자 활동 기록 (자동 새로고침을 위해)
+      if (updateActivity) {
+        updateActivity();
+      }
+
       // 새로운 콘텐츠 생성 (이미 있어도 재생성)
       try {
         setLoadingItems(new Set([...loadingItems, article.news_id]));
@@ -488,7 +499,7 @@ const WorkStatusTable = ({ newsData, onStatusChange, onCopySuccess }) => {
         );
       }
     },
-    [loadingItems, onCopySuccess]
+    [loadingItems, onCopySuccess, updateActivity]
   );
 
   const handleInstagramCopy = useCallback(
@@ -498,6 +509,11 @@ const WorkStatusTable = ({ newsData, onStatusChange, onCopySuccess }) => {
           onCopySuccess("생성된 콘텐츠가 없습니다.");
         }
         return;
+      }
+
+      // 사용자 활동 기록
+      if (updateActivity) {
+        updateActivity();
       }
 
       try {
@@ -512,7 +528,7 @@ const WorkStatusTable = ({ newsData, onStatusChange, onCopySuccess }) => {
         }
       }
     },
-    [onCopySuccess]
+    [onCopySuccess, updateActivity]
   );
 
   // 데이터가 없는 경우
